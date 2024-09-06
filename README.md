@@ -1,11 +1,12 @@
-Modelling with Xpress
-Consultancy
+# Modelling with Xpress
+
+## Consultancy
 The case study offers the opportunity to study how one might act if brought in as a consultant to a company. It can be taken as examples of problems which might be brought to a consultancy firm. Your submission should communicate the results of your investigation as you might do to the company. What follows are some general observations which should give you an idea of how your submission should be constructed.
 
-Communication
+## Communication
 In the context of consultancy, it is important to communicate properly with customers. You may well have to present your work to both a manager (who will have to take decisions based on your observations and conclusions) and someone in a technical capacity (who will have to work with the model that you have developed). In presenting your investigations of the case study you should have this model in mind. Your written report should be appropriate for a manager to a read. Your Mosel file should be clearly structured and commented to indicate how the problem has been modelled and enable new data and minor modifications can be introduced.
 
-A written report
+## Written report
 A manager will expect the following of a written report
 
 A clear statement of the problem that you have been addressing
@@ -25,4 +26,3 @@ By careful choice of variable names and the use of comments, it should be clear 
 Caveat
 Clearly the observations above are a gross simplification of the consultant-client relationship and communication. However, the simplification is justified on the grounds that the main aim of this section of the course is to introduce Xpress.
 
-Back to Modelling with Xpress home page
