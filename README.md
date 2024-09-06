@@ -32,7 +32,7 @@ This project focuses on the optimization of TomMac's tomato processing operation
 
 1. **Model Execution**:
    - The code is written in Xpress-Mosel (MMXPRS). 
-   - To execute the model, run the `Group_11_Code.txt` in a compatible environment.
+   - To execute the model, run the `Code.mos` in a compatible environment.
    - The model outputs CSV files with detailed breakdowns of income, cost, and product use per quarter.
 
 2. **Strategic Decisions Simulation**:
