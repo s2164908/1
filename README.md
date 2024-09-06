@@ -1,3 +1,5 @@
+# TomMac Optimization Project
+
 ## Introduction
 
 This project focuses on the optimization of TomMac's tomato processing operations. TomMac processes three types of tomatoes into four distinct products under various constraints (supply, production, demand, and contracts). The goal is to maximize annual profit by optimizing the company's resource management. The project includes a report, presentation, and a mathematical model implemented in code.
