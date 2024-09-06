@@ -1,28 +1,49 @@
-# Modelling with Xpress
+## Introduction
 
-## Consultancy
-The case study offers the opportunity to study how one might act if brought in as a consultant to a company. It can be taken as examples of problems which might be brought to a consultancy firm. Your submission should communicate the results of your investigation as you might do to the company. What follows are some general observations which should give you an idea of how your submission should be constructed.
+This project focuses on the optimization of TomMac's tomato processing operations. TomMac processes three types of tomatoes into four distinct products under various constraints (supply, production, demand, and contracts). The goal is to maximize annual profit by optimizing the company's resource management. The project includes a report, presentation, and a mathematical model implemented in code.
 
-## Communication
-In the context of consultancy, it is important to communicate properly with customers. You may well have to present your work to both a manager (who will have to take decisions based on your observations and conclusions) and someone in a technical capacity (who will have to work with the model that you have developed). In presenting your investigations of the case study you should have this model in mind. Your written report should be appropriate for a manager to a read. Your Mosel file should be clearly structured and commented to indicate how the problem has been modelled and enable new data and minor modifications can be introduced.
+## Project Files
 
-## Written report
-A manager will expect the following of a written report
+- **Group_11_Report.pdf**: Detailed analysis and findings on TomMac's current operations and future strategic decisions.
+- **Group_11_Presentation.pdf**: A concise presentation of the TomMac case study, including key results and strategic recommendations.
+- **TomMacPlan.txt**: Contains TomMac’s operational and strategic plans including new contract terms, production increases, and warehouse adjustments.
+- **Group_11_Code.txt**: The code for the mathematical model used to simulate and optimize TomMac's operations under various constraints and scenarios.
 
-A clear statement of the problem that you have been addressing
-Your statement of the problem should not be a restatement of the wording in the case study documentation, as this is presenting the company to you. Here you are presenting what you have done to the company, who know the background.
+## Features
 
-An indication of the process used to model it
-A manager's concern will be that the process has been carried out properly and that the model has been documented for the benefit of those who will have to use or modify it. He or she will not be interested in the details of the model such as the form of the objective and constraints or the names of the variables used. A simple statement that XPress has been used and that the details are set out in an accompanying Mosel file will be sufficient.
+1. **Base Case Scenario**: 
+   - Annual income: £136,498
+   - Annual cost: £112,006.3
+   - Maximized annual profit: £24,491.7
+   - Breakdown by quarters is available in the report and presentation.
+   
+2. **Strategic Decisions**:
+   - Three key decisions: Renting a new warehouse, signing a new contract, and increasing production limits.
+   - The most profitable strategy involves signing a new contract and renting additional warehouse space, resulting in an increased annual profit of £56,041.7.
 
-The results obtained using the model
-Results should be presented clearly in terms of the original problem. For problems with many decision variables, it is preferable to communicate their values in a table given as an appendix.
+3. **Mathematical Model**:
+   - Implemented in Xpress-Mosel to handle quarterly constraints and optimize production and sales.
+   - Decision variables include the use of tomato varieties, product sales, stock levels, and warehouse capacity.
+   - The model supports scenario testing for future strategic arrangements.
 
-Observations, conclusions and recommendations
-Sample reports
-A Mosel file
-By careful choice of variable names and the use of comments, it should be clear how you have modelled the problem. The data required to generate the model's dimension and coefficients should be read in from a data file. If the model doesn't generate results for all the variants studied, it should be possible to do so by making simple and clearly documented changes to the Mosel file.
+## Usage
 
-Caveat
-Clearly the observations above are a gross simplification of the consultant-client relationship and communication. However, the simplification is justified on the grounds that the main aim of this section of the course is to introduce Xpress.
+1. **Model Execution**:
+   - The code is written in Xpress-Mosel (MMXPRS). 
+   - To execute the model, run the `Group_11_Code.txt` in a compatible environment.
+   - The model outputs CSV files with detailed breakdowns of income, cost, and product use per quarter.
 
+2. **Strategic Decisions Simulation**:
+   - The model can simulate different combinations of strategic decisions (warehouse expansion, production increase, and new contract acceptance).
+   - Results are displayed for each scenario, including profit maximization and feasibility checks.
+
+## Project Team
+
+- Vojin Radovanovic
+- Aleksa Scepanovic
+- Yuhang Zheng
+- Sebastian Tomass
+
+## Conclusion
+
+This project effectively models and optimizes TomMac’s operations by addressing key constraints in supply, production, and demand. The optimal strategy has been identified to maximize annual profit. Further expansion and new market considerations have been proposed for future analysis.
