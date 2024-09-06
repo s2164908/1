@@ -1,0 +1,15 @@
+NewWarehouseSize: 5000
+NewWarehouseCost: 3000
+
+NewContract:      [ 600 1000 1000 2000]
+NewContractPrice: [2.316 3.192 5.220 2.460]
+
+NewProductionIncrease: 20
+NewProductionCost: 400
+
+Demand:    [1200 1200 1200 2400]
+SalePrice: [2.460 3.324 5.508 2.748]
+
+ContractPrice: [2.208 2.904 5.100 2.484]
+
+ProductionCost: [1.050 1.575 2.625 1.050]

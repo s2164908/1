@@ -1,0 +1,676 @@
+model Model
+uses "mmxprs"
+
+declarations
+  !Variables from TomMac.dat
+  Products:   set of string
+  Varieties:  set of string
+  Contents:   set of string
+  ProductReduction:       array(Products) of real
+  OtherIngredientFactor:  array(Products) of real
+  OtherIngredientCost:    array(Products) of real
+  ProductionCost:         array(Products) of real
+  TomatoProperties:       array(Contents, Varieties) of real
+  ProductProperties:      array(Contents, Products) of real
+  StorageCost:            real
+  WarehouseSize:          real
+  NewWarehouseSize:       real
+  NewWarehouseCost:       real
+  NewProductionIncrease:  real
+  NewProductionCost:      real
+
+  !Add integer set to number quarters
+  NQuarters = 4
+  Quarters = 1..NQuarters
+
+  !Variables from TomMacQuaters.dat
+  PeriodNames:  set of string
+  TomatoSupply: array(Varieties, Quarters) of real
+  TomatoCost:   array(Varieties, Quarters) of real
+  Demand:           array(Products) of real
+  SalePrice:        array(Products) of real
+  Contract:         array(Products) of real
+  ContractPrice:    array(Products) of real
+  NewContract:      array(Products) of real
+  NewContractPrice: array(Products) of real
+  ProductionLimit:  array(Products) of real
+
+  !Define decision variables
+  Use:    array(Varieties, Products, Quarters) of mpvar !kilos of tomato varieties used per product per quarter
+  Make:   array(Products, Quarters) of mpvar            !kilos of products made per quarter
+  Sell:   array(Products, Quarters) of mpvar            !kilos of products sold per quarter
+  Stock:  array(Products, Quarters) of mpvar            !kilos of products in stock per quarter
+end-declarations
+
+initialisations from "TomMac.dat"
+    Products Varieties Contents ProductReduction OtherIngredientFactor OtherIngredientCost ProductionCost TomatoProperties ProductProperties
+    StorageCost WarehouseSize NewWarehouseSize NewWarehouseCost NewProductionIncrease NewProductionCost
+end-initialisations
+
+initialisations from "TomMacQuarters.dat"
+  PeriodNames TomatoSupply TomatoCost Demand SalePrice Contract ContractPrice NewContract NewContractPrice ProductionLimit
+end-initialisations
+
+!declare procedures used in code
+forward procedure feasibility               !used to check feasibility of LP
+forward procedure product_data(pr: string)  !used for generating CSV data for products
+forward procedure strategicdecision         !used for testing scenarios
+
+!helper variable: 1 for adding non-negative quarterly profit, 0 for allowing non-negative quarterly profit
+NonNegQProfit := 0
+
+!Base case
+!define all additional variables
+forall(q in Quarters) do
+  !product-related variables
+  forall(pr in Products) do
+    OtherIngredientCostQuarter(pr, q) := OtherIngredientCost(pr) *
+                                          OtherIngredientFactor(pr) *
+                                          ProductReduction(pr) *
+                                          sum(v in Varieties) Use(v, pr, q) !total spent on other ingredients per product per quarter
+
+    ProductionCostQuarter(pr, q) := ProductionCost(pr) * Make(pr,q) !total spent on production per product per quarter
+    MakeCostQuarter(pr, q) := OtherIngredientCostQuarter(pr, q) + ProductionCostQuarter(pr, q)  !cost of product produced per quarter
+	  StockCost(pr, q) := Stock(pr, q) * StorageCost  !calculate cost of quarterly stock of products
+  end-do
+
+  !tomato variety related variables
+  forall(v in Varieties)
+    TotalTomatoCostQuarter(v, q) := sum(pr in Products) Use(v,pr,q) * TomatoCost(v,q)  !total cost of tomato variety per quarter
+
+  !calculate quarterly income, cost and profit
+  Income(q) := sum(pr in Products) (Contract(pr)*ContractPrice(pr) +
+                                      (Sell(pr,q)-Contract(pr))*SalePrice(pr)) !quarterly income
+  Cost(q) := sum(v in Varieties) TotalTomatoCostQuarter(v, q) +
+              sum(pr in Products) MakeCostQuarter(pr, q) +
+              sum(pr in Products) StockCost(pr, q) !quarterly cost
+  Profit(q) := Income(q) - Cost(q) !quarterly profit
+end-do
+
+
+!define the objective
+TotalIncome := sum(q in Quarters) Income(q)
+TotalCost := sum(q in Quarters) Cost(q)
+TotalProfit := TotalIncome - TotalCost
+
+
+!set up the constraints
+forall(q in Quarters) do
+  !tomato related constraints
+  forall(v in Varieties)
+    SupplyCS(v,q) := sum(pr in Products) Use(v,pr,q) <= TomatoSupply(v,q)
+
+  !product related constraints
+  forall(pr in Products) do
+    ProductionCS(pr, q) := Make(pr,q) <= ProductionLimit(pr)
+    DemandCS(pr, q) := Sell(pr,q) - Contract(pr) <= Demand(pr)
+    ContractCS(pr, q) := Sell(pr, q) >= Contract(pr)
+    !product produced per quarter: P=(1+I)RM
+    MakeCS(pr, q) := Make(pr, q) = (1+OtherIngredientFactor(pr)) *
+                                    ProductReduction(pr) *
+                                    sum(v in Varieties) Use(v, pr, q)
+
+    !content makeup constraints (solid/liquid)
+    forall(c in Contents) do
+      !define additional variable for shorthand: MakeContent(c, pr, q)
+      MakeContent(c, pr, q) := ((1+OtherIngredientFactor(pr)) * ProductReduction(pr) *
+                                    sum(v in Varieties) (TomatoProperties(c, v) * Use(v, pr, q)))
+
+      !define upper and lower bound constraints
+      ContentLBCS(c, pr, q) := MakeContent(c, pr, q) >= ProductProperties(c, pr) * Make(pr, q)
+      ContentUBCS(c, pr, q) := MakeContent(c, pr, q) <= ProductProperties(c, pr) * Make(pr, q)
+    end-do
+
+    !total content constraint
+    TotalContentCS(pr, q) := sum(c in Contents) MakeContent(c, pr, q) = Make(pr, q)
+
+    !stock constraints
+    if q = 1 then
+		  StockCS(pr, q) := Stock(pr, q) = Stock(pr, NQuarters) + Make(pr, q) - Sell(pr, q)
+	  else
+		  StockCS(pr, q) := Stock(pr, q) = Stock(pr, q-1) + Make(pr, q) - Sell(pr, q)
+	  end-if
+  end-do
+
+  !warehouse size constraint
+  WarehouseCS(q) := sum(pr in Products) Stock(pr, q) <= WarehouseSize
+end-do
+
+!if NonNegQProfit=1, add extra constraints
+if NonNegQProfit = 1 then
+  !force quarterly profit to be non-negative
+  forall(q in Quarters)
+    ProfitCS(q) := Profit(q) >= 0
+  
+  !additional constraint: force Paste production to equal production capacity in Q3
+  !(otherwise would be false due to non-negative profit)
+  PasteCS := Make("Paste", 3) = ProductionLimit("Paste")
+end-if
+
+!maximise objective
+maximise(TotalProfit)
+
+
+
+
+
+!initialize status of LP as "Pending" and then execute procedure
+status := "Pending"
+feasibility
+writeln
+
+!print results if optimal solution is found
+if status="Optimum found" then
+  writeln("Income breakdown:")
+  writeln("Quarter\tContract(£) Demand(£) Total Income(£)")
+  forall(q in Quarters)
+    writeln(PeriodNames(q), "\t", strfmt(sum(pr in Products) (Contract(pr)*ContractPrice(pr)),0,1), "\t",
+            strfmt(sum(pr in Products) ((getsol(Sell(pr,q))-Contract(pr))*SalePrice(pr)),0,1), "\t",
+            strfmt(getsol(Income(q)),0,1))
+  writeln("Year\t", strfmt(sum(q in Quarters) sum(pr in Products) (Contract(pr)*ContractPrice(pr)),0,1), "\t",
+          strfmt(sum(q in Quarters) sum(pr in Products) ((getsol(Sell(pr,q))-Contract(pr))*SalePrice(pr)),0,1), "\t",
+          strfmt(getsol(TotalIncome),0,1))
+
+  writeln
+
+  writeln("Demand income breakdown per product per quarter:")
+  write("Quarter\t")
+  forall(pr in Products)
+    write(pr, "(kg) ", pr, "(£) ")
+  writeln
+  forall(q in Quarters) do
+    write(PeriodNames(q), "\t")
+    forall(pr in Products)
+      write(strfmt(getsol(Sell(pr,q))-Contract(pr),0,1), "\t",
+            strfmt((getsol(Sell(pr,q))-Contract(pr))*SalePrice(pr),0,1), "\t")
+    writeln
+  end-do
+
+  write("Year\t")
+    forall(pr in Products)
+      write(strfmt(sum(q in Quarters) (getsol(Sell(pr,q))-Contract(pr)),0,1), "\t",
+            strfmt(sum(q in Quarters) (getsol(Sell(pr,q))-Contract(pr))*SalePrice(pr),0,1), "\t")
+  writeln
+
+  writeln
+
+  writeln("Cost breakdown:")
+  writeln("Quarter\tTomatoes(£) Making Products(£) Storing(£) Total Cost(£)")
+  forall(q in Quarters)
+    writeln(PeriodNames(q), "\t", strfmt(sum(v in Varieties) getsol(TotalTomatoCostQuarter(v, q)),0,1), "\t",
+            strfmt(sum(pr in Products) getsol(MakeCostQuarter(pr, q)),0,1), "\t",
+            strfmt(sum(pr in Products) getsol(StockCost(pr, q)),0,1), "\t",
+            strfmt(getsol(Cost(q)),0,1))
+  writeln("Year\t", strfmt(sum(q in Quarters) sum(v in Varieties) getsol(TotalTomatoCostQuarter(v, q)),0,1), "\t",
+          strfmt(sum(q in Quarters) sum(pr in Products) getsol(MakeCostQuarter(pr, q)),0,1), "\t",
+          strfmt(sum(q in Quarters) sum(pr in Products) getsol(StockCost(pr, q)),0,1), "\t",
+          strfmt(getsol(TotalCost),0,1))
+
+  writeln
+
+  writeln("Amount of varieties used per quarter (amount and cost):")
+  write("Quarter\t")
+  forall(v in Varieties)
+    write(v, "(kg) ", v, "(£) ")
+  writeln
+  forall(q in Quarters) do
+    write(PeriodNames(q), "\t")
+    forall(v in Varieties)
+      write(strfmt(sum(pr in Products) getsol(Use(v, pr, q)),0,1), "\t",
+            strfmt(getsol(TotalTomatoCostQuarter(v, q)),0,1), "\t")
+    writeln
+  end-do
+  write("Year\t")
+  forall(v in Varieties)
+    write(strfmt(sum(pr in Products) sum(q in Quarters) getsol(Use(v, pr, q)),0,1), "\t",
+          strfmt(sum(q in Quarters) getsol(TotalTomatoCostQuarter(v, q)),0,1), "\t")
+  writeln
+
+  writeln
+
+  writeln("Amount of products made per quarter (amount and cost):")
+  write("Quarter\t")
+  forall(pr in Products)
+    write(pr, "(kg) ", pr, "(£) ")
+  writeln
+  forall(q in Quarters) do
+    write(PeriodNames(q), "\t")
+    forall(pr in Products)
+      write(strfmt(getsol(Make(pr, q)),0,1), "\t",
+            strfmt(getsol(MakeCostQuarter(pr, q)),0,1), "\t")
+    writeln
+  end-do
+  write("Year\t")
+  forall(pr in Products)
+    write(strfmt(sum(q in Quarters) getsol(Make(pr, q)),0,1), "\t",
+          strfmt(sum(q in Quarters) getsol(MakeCostQuarter(pr, q)),0,1), "\t")
+  writeln
+
+  writeln
+  
+  writeln("Amount of products in stock per quarter (amount and cost):")
+  write("Quarter\t")
+  forall(pr in Products)
+    write(pr, "(kg) ", pr, "(£) ")
+  writeln
+  forall(q in Quarters) do
+    write(PeriodNames(q), "\t")
+    forall(pr in Products)
+      write(strfmt(getsol(Stock(pr, q)),0,1), "\t",
+            strfmt(getsol(StockCost(pr, q)),0,1), "\t")
+    writeln
+  end-do
+  write("Year\t")
+  forall(pr in Products)
+    write(strfmt(sum(q in Quarters) getsol(Stock(pr, q)),0,1), "\t",
+          strfmt(sum(q in Quarters) getsol(StockCost(pr, q)),0,1), "\t")
+  writeln
+
+  writeln
+
+  writeln("Total income is £", strfmt(getsol(TotalIncome),0,1))
+  writeln("Total cost is £", strfmt(getsol(TotalCost),0,1))
+  writeln("The maximised total profit is £", strfmt(getsol(TotalProfit),0,1))
+  
+  writeln
+  
+  writeln("Profit per quarter:")
+  writeln("Quarter Profit")
+  forall(q in Quarters)
+    writeln(PeriodNames(q), "\t", strfmt(getsol(Profit(q)), 0, 1))
+  writeln
+end-if
+
+
+!get dual values
+if status="Optimum found" then
+  forall(q in Quarters) do
+    writeln("Boundary perturbations for ", PeriodNames(q), ":")
+    !tomato related constraints
+    forall(v in Varieties)
+      if getslack(SupplyCS(v, q)) = 0 then
+        writeln("- If the supply of ", v, " is increased by 1 during ", PeriodNames(q), ", profit would rise by £", strfmt(getdual(SupplyCS(v, q)),0,1), ",")
+        writeln("\tthe range for the new value is from ", strfmt(getsensrng(XPRS_DN, SupplyCS(v, q)), 0, 1), " to ", strfmt(getsensrng(XPRS_UP, SupplyCS(v, q)), 0, 1), ".")
+      end-if
+    writeln
+
+    !product related constraints
+    forall(pr in Products) do
+      if getslack(ProductionCS(pr, q)) = 0 then
+        writeln("- If the production limit of ", pr, " is increased by 1 during ", PeriodNames(q), ", profit would rise by £", strfmt(getdual(ProductionCS(pr, q)),0,1), ",")
+        writeln("\tthe range for the new value is from ", strfmt(getsensrng(XPRS_DN, ProductionCS(pr, q)), 0, 1), " to ", strfmt(getsensrng(XPRS_UP, ProductionCS(pr, q)), 0, 1), ".")
+      end-if
+      if getslack(DemandCS(pr, q)) = 0 then
+        writeln("- If the demand for ", pr, " is increased by 1 during ", PeriodNames(q), ", profit would rise by £", strfmt(getdual(DemandCS(pr, q)),0,1), ",")
+        writeln("\tthe range for the new value is from ", strfmt(getsensrng(XPRS_DN, DemandCS(pr, q)), 0, 1), " to ", strfmt(getsensrng(XPRS_UP, DemandCS(pr, q)), 0, 1), ".")
+      end-if
+      if getslack(ContractCS(pr, q)) = 0 then
+        writeln("- If the contract for ", pr, " is increased by 1 during ", PeriodNames(q), ", profit would rise by £", strfmt(getdual(ContractCS(pr, q)),0,1), ",")
+        writeln("\tthe range for the new value is from ", strfmt(getsensrng(XPRS_DN, ContractCS(pr, q)), 0, 1), " to ", strfmt(getsensrng(XPRS_UP, ContractCS(pr, q)), 0, 1), ".")
+      end-if
+    end-do
+    writeln
+
+    !warehouse size constraint
+    if getslack(WarehouseCS(q)) = 0 then
+      writeln("- If the warehouse size is increased by 1 during ", PeriodNames(q), ", profit would rise by £", strfmt(getdual(WarehouseCS(q)),0,1), ",")
+      writeln("\tthe range for the new value is from ", strfmt(getsensrng(XPRS_DN, WarehouseCS(q)), 0, 1), " to ", strfmt(getsensrng(XPRS_UP, WarehouseCS(q)), 0, 1), ".")
+    end-if
+    
+    writeln
+  end-do
+end-if
+
+
+!export results to CSV
+if status="Optimum found" then
+  !Profit breakdown by quarters (aggregated for all products)
+  fopen("TomMacProfit.csv", F_OUTPUT)
+    writeln("Quarter,Income(£),Cost(£),Profit(£)")
+    forall(q in Quarters)
+      writeln(PeriodNames(q), ",", strfmt(getsol(Income(q)), 0, 1), ",",
+              strfmt(getsol(Cost(q)), 0, 1), ",",
+              strfmt(getsol(Profit(q)), 0, 1), ",")
+    writeln("Year", ",", strfmt(getsol(TotalIncome), 0, 1), ",", strfmt(getsol(TotalCost), 0, 1), ",", strfmt(getsol(TotalProfit), 0, 1))
+  fclose(F_OUTPUT)
+  
+  !Income breakdown by quarters (aggregated for all products)
+  fopen("TomMacIncome.csv", F_OUTPUT)
+    writeln("Quarter,Contract(£),Demand(£),Total Income(£)")
+    forall(q in Quarters)
+      writeln(PeriodNames(q), ",", strfmt(sum(pr in Products) (Contract(pr)*ContractPrice(pr)),0,1), ",",
+              strfmt(sum(pr in Products) ((getsol(Sell(pr,q))-Contract(pr))*SalePrice(pr)),0,1), ",",
+              strfmt(getsol(Income(q)),0,1))
+    writeln("Year",",", strfmt(sum(q in Quarters) sum(pr in Products) (Contract(pr)*ContractPrice(pr)),0,1), ",",
+            strfmt(sum(q in Quarters) sum(pr in Products) ((getsol(Sell(pr,q))-Contract(pr))*SalePrice(pr)),0,1), ",",
+            strfmt(getsol(TotalIncome),0,1))
+  fclose(F_OUTPUT)
+
+  !Cost breakdown table by quarters (aggregated for all tomato varieties and products)
+  fopen("TomMacCost.csv", F_OUTPUT)
+    writeln("Quarter,Tomatoes(£), Making Products(£) ,Storing(£) ,Total Cost(£)")
+    forall(q in Quarters)
+      writeln(PeriodNames(q), ",", strfmt(sum(v in Varieties) getsol(TotalTomatoCostQuarter(v, q)),0,1), ",",
+              strfmt(sum(pr in Products) getsol(MakeCostQuarter(pr, q)),0,1), ",",
+              strfmt(sum(pr in Products) getsol(StockCost(pr, q)),0,1), ",",
+              strfmt(getsol(Cost(q)),0,1))
+    writeln("Year", ",", strfmt(sum(q in Quarters) sum(v in Varieties) getsol(TotalTomatoCostQuarter(v, q)),0,1), ",",
+            strfmt(sum(q in Quarters) sum(pr in Products) getsol(MakeCostQuarter(pr, q)),0,1), ",",
+            strfmt(sum(q in Quarters) sum(pr in Products) getsol(StockCost(pr, q)),0,1),",",
+            strfmt(getsol(TotalCost),0,1))
+    writeln
+  fclose(F_OUTPUT)
+  
+  !Production (amount and cost) table by quarters
+  fopen("TomMacMake.csv", F_OUTPUT)
+    write("Quarters")
+    forall(pr in Products)
+      write(",",pr, " Production(kg) ",",", pr, " Cost(£) ")
+    writeln
+    forall(q in Quarters) do
+      write(PeriodNames(q))
+      forall(pr in Products) do
+        write(",",strfmt(getsol(Make(pr, q)),0,1))
+        write(",",strfmt(getsol(MakeCostQuarter(pr, q)),0,1))
+      end-do
+      writeln
+    end-do
+    write("Year")
+    forall(pr in Products) do
+      write(",",strfmt(sum(q in Quarters) getsol(Make(pr, q)),0,1))
+      write(",",strfmt(sum(q in Quarters) getsol(MakeCostQuarter(pr, q)),0,1))
+    end-do
+    writeln
+  fclose(F_OUTPUT)
+
+  !Use of Tomatoes (amount and cost) table by quarters (aggregated for all products)
+  fopen("TomMacVarieties.csv",F_OUTPUT)
+    write("Quarter")
+    forall(v in Varieties)
+      write(",",v, "(kg) ",  "," , v, "(£) ")
+    writeln
+    forall(q in Quarters) do
+      write(PeriodNames(q))
+      forall(v in Varieties)
+        write(",",strfmt(sum(pr in Products) getsol(Use(v, pr, q)),0,1), ",",
+              strfmt(getsol(TotalTomatoCostQuarter(v, q)),0,1))
+      writeln
+    end-do
+    write("Year")
+    forall(v in Varieties)
+      write(",",strfmt(sum(pr in Products) sum(q in Quarters) getsol(Use(v, pr, q)),0,1), ",",
+            strfmt(sum(q in Quarters) getsol(TotalTomatoCostQuarter(v, q)),0,1))
+    writeln
+
+    writeln
+  fclose(F_OUTPUT)
+
+
+  !Demand income table breakdown by products in quarters
+  fopen("TomMacDemand.csv", F_OUTPUT)
+    write("Quarter")
+    forall(pr in Products)
+      write(",",pr, "(kg) ",",", pr, "(£) ")
+    writeln
+    forall(q in Quarters) do
+      write(PeriodNames(q))
+      forall(pr in Products)
+        write(",",strfmt(getsol(Sell(pr,q))-Contract(pr),0,1), ",",
+              strfmt((getsol(Sell(pr,q))-Contract(pr))*SalePrice(pr),0,1), ",")
+      writeln
+    end-do
+    write("Year")
+    forall(pr in Products)
+      write(",",strfmt(sum(q in Quarters) (getsol(Sell(pr,q))-Contract(pr)),0,1), ",",
+            strfmt(sum(q in Quarters) (getsol(Sell(pr,q))-Contract(pr))*SalePrice(pr),0,1))
+    writeln
+  fclose(F_OUTPUT)
+  
+  !Selling breakdown per product per quarter (contract+demand)
+  fopen("TomMacSell.csv", F_OUTPUT)
+    write("Quarter")
+    forall(pr in Products)
+      write(",",pr, " Sold(kg) ",",", pr, "(£) ")
+    writeln
+    forall(q in Quarters) do
+      write(PeriodNames(q))
+      forall(pr in Products)
+        write(",",strfmt(getsol(Sell(pr,q)),0,1), ",",
+              strfmt(getsol(Demand(pr)*SalePrice(pr)+Contract(pr)*ContractPrice(pr)),0,1))
+      writeln
+    end-do
+    write("Year")
+    forall(pr in Products)
+      write(",",strfmt(sum(q in Quarters) (getsol(Sell(pr,q))),0,1), ",",
+            strfmt(sum(q in Quarters) getsol(Demand(pr)*SalePrice(pr)+Contract(pr)*ContractPrice(pr)),0,1))
+    writeln
+  fclose(F_OUTPUT)
+  
+  !Stock breakdown per product per quarter (kg and cost)
+  fopen("TomMacStock.csv", F_OUTPUT)
+    write("Quarter")
+    forall(pr in Products)
+      write(",", pr, "(kg)", ",", pr, "(£)")
+    writeln
+    forall(q in Quarters) do
+      write(PeriodNames(q))
+      forall(pr in Products)
+        write(",",strfmt(getsol(Stock(pr,q)),0,1), ",",
+              strfmt(getsol(Stock(pr,q)*StorageCost),0,1))
+      writeln
+    end-do
+    write("Year")
+    forall(pr in Products)
+      write(",",strfmt(sum(q in Quarters) (getsol(Stock(pr,q))),0,1), ",",
+            strfmt(sum(q in Quarters) getsol(Stock(pr,q)*StorageCost),0,1))
+    writeln
+  fclose(F_OUTPUT)
+  
+  !Tables below is a organized version
+  !Table 1: Information of single product: Juice
+  fopen("TomMacJuice.csv", F_OUTPUT)
+  product_data("Juice")
+  fclose(F_OUTPUT)
+  
+  !Table 2: Information of single product: Sauce
+  fopen("TomMacSauce.csv", F_OUTPUT)
+  product_data("Sauce")
+  fclose(F_OUTPUT)
+  
+  !Table 3: Information of single product: Paste
+  fopen("TomMacPaste.csv", F_OUTPUT)
+  product_data("Paste")
+  fclose(F_OUTPUT)
+  
+  !Table 4: Information of single product: Canned
+  fopen("TomMacCanned.csv", F_OUTPUT)
+  product_data("Canned")
+  fclose(F_OUTPUT)
+  
+  !report of all decision variables (aggregated for all products)
+  fopen("report_quantity.csv", F_OUTPUT)
+    write("Quarters")
+    write(",Production(kg),Demand(kg),Contract(kg),Stock(kg)")
+    writeln
+    forall(q in Quarters) do
+    write(PeriodNames(q))
+    write(",",strfmt(getsol(sum(pr in Products)Make(pr,q)),0,1))
+    write(",",strfmt(getsol(sum(pr in Products)(Sell(pr,q)-Contract(pr))),0,1))
+    write(",",strfmt(getsol(sum(pr in Products)Contract(pr)),0,1))
+    write(",",strfmt(getsol(sum(pr in Products)(Stock(pr,q))),0,1))
+    writeln
+    end-do
+  fclose(F_OUTPUT)
+end-if
+
+
+
+
+
+!call procedure to determine best future strategic decision
+if status="Optimum found" then
+  strategicdecision
+end-if
+
+
+!procedure definition: check feasibility of LP
+procedure feasibility
+  if getprobstat = XPRS_OPT then
+    status := "Optimum found"
+  elif getprobstat = XPRS_UNF then
+    status := "Unfinished"
+  elif getprobstat = XPRS_INF then
+    status := "Infeasible"
+  elif getprobstat = XPRS_UNB then
+    status := "Unbounded"
+  elif getprobstat = XPRS_OTH then
+    status := "Failed"
+  else
+    status := "???"
+  end-if
+  writeln("Problem status: ", status)
+end-procedure
+
+
+!procedure definition: export all generated data about a single product to a CSV
+procedure product_data(pr: string)
+  write("Quarter")
+  write(",Production(kg),Sold(kg),Stock(kg),Demand(kg),Income(£),Total cost(£),Profit(£),Contract(kg)")
+  forall(v in Varieties)
+    write(",", v, " used(kg)")
+  writeln
+  forall(q in Quarters) do
+    write(PeriodNames(q))
+    write(",",strfmt(getsol(Make(pr,q)),0,1))
+    write(",",strfmt(getsol(Sell(pr,q)),0,1))
+    write(",",strfmt(getsol(Stock(pr,q)),0,1))
+    write(",",strfmt(getsol(Sell(pr,q)-Contract(pr)),0,1))
+    write(",",strfmt(getsol((Contract(pr)*ContractPrice(pr) + (Sell(pr,q)-Contract(pr))*SalePrice(pr))),0,1))
+    write(",",strfmt(getsol(MakeCostQuarter(pr, q)+ StockCost(pr, q)+
+                            sum(v in Varieties) Use(v,pr,q) * TomatoCost(v,q)),0,1))
+    write(",",strfmt(getsol((Contract(pr)*ContractPrice(pr) + (Sell(pr,q)-Contract(pr))*SalePrice(pr))-
+                            (MakeCostQuarter(pr, q)+ StockCost(pr, q)+ (sum(v in Varieties) Use(v,pr,q) * TomatoCost(v,q)))),0,1))
+    write(",",strfmt(getsol(Sell(pr,q)-Demand(pr)),0,1))
+    forall(v in Varieties)
+      write(",", strfmt(getsol(Use(v,pr,q)),0,1))
+  writeln
+  end-do
+end-procedure
+
+
+!procefure definition: scenarios on strategic decisions
+procedure strategicdecision
+  initialisations from "TomMacPlan.dat"
+      NewWarehouseSize NewWarehouseCost NewContract NewContractPrice NewProductionIncrease NewProductionCost
+      Demand SalePrice ContractPrice ProductionCost
+  end-initialisations
+
+  !add delta for change of product properties
+  delta := 0.02
+  
+  !keep track of highest profit in scenarios
+  HighestProfit := getsol(TotalProfit)
+  
+  !NewContractDecision, IncreaseWarehouse, IncreaseProduction are taking values 0 or 1 depending on whether we want to make respective strategic decisions
+  forall(NewContractDecision in 0..1) do
+    forall(IncreaseWarehouse in 0..1) do
+      forall(IncreaseProduction in 0..1) do
+        !recalculate additional variables
+        forall(q in Quarters) do
+          forall(pr in Products) do
+            ProductionCostQuarter(pr, q) := ProductionCost(pr) * Make(pr,q) !total spent on production per product per quarter
+            MakeCostQuarter(pr, q) := OtherIngredientCostQuarter(pr, q) + ProductionCostQuarter(pr, q)  !cost of product produced per quarter
+          end-do
+
+          !recalculate the new quarterly income, cost and profit
+          Income(q) := sum(pr in Products) (Contract(pr)*ContractPrice(pr) + NewContractDecision * (NewContract(pr)*NewContractPrice(pr))+
+                                          (Sell(pr,q)-Contract(pr)- NewContractDecision * NewContract(pr))*SalePrice(pr)) !new quarterly income
+          Cost(q) := sum(v in Varieties) TotalTomatoCostQuarter(v, q) +
+                      sum(pr in Products) MakeCostQuarter(pr, q) +
+                      sum(pr in Products) StockCost(pr, q) !new quarterly cost without annual payments
+          
+          !add annual costs to final quarter
+          if q = 4 then
+            Cost(4) += NewWarehouseCost * IncreaseWarehouse + NewProductionCost * IncreaseProduction
+          end-if
+          
+          Profit(q) := Income(q) - Cost(q) !new quarterly profit
+        end-do
+        
+        
+        !redefine the objective
+        NewTotalIncome := sum(q in Quarters) Income(q)
+        NewTotalCost := sum(q in Quarters) Cost(q)
+        NewTotalProfit := NewTotalIncome - NewTotalCost
+        
+        
+        !redefine affected constraints
+        forall(q in Quarters) do
+          !product related constraints
+          forall(pr in Products) do
+            !update production limit
+            ProductionCS(pr, q) := Make(pr, q) <= ProductionLimit(pr) * (1 + NewProductionIncrease / 100 * IncreaseProduction)
+            DemandCS(pr, q) := Sell(pr,q) - Contract(pr) - NewContractDecision * NewContract(pr) <= Demand(pr)
+            ContractCS(pr, q) := Sell(pr, q) >= Contract(pr) + NewContractDecision * NewContract(pr)
+
+            !content makeup constraints (solid/liquid)
+            forall(c in Contents) do
+              !define upper and lower bound constraints
+              ContentLBCS(c, pr, q) := MakeContent(c, pr, q) >= (ProductProperties(c, pr)-delta) * Make(pr, q)
+              ContentUBCS(c, pr, q) := MakeContent(c, pr, q) <= (ProductProperties(c, pr)+delta) * Make(pr, q)
+            end-do
+          end-do
+          
+          !warehouse constraint
+          WarehouseCS(q) := sum(pr in Products) Stock(pr, q) <= WarehouseSize + NewWarehouseSize * IncreaseWarehouse
+        end-do
+        
+        
+        !Maximise the new profit
+        maximise(NewTotalProfit)
+        
+        
+        !print the strategy
+        writeln("Strategy:")
+
+        if(IncreaseProduction = 1) then
+          writeln("- Increasing production limit, ")
+        else
+          writeln("- Not increasing production limit, ")
+        end-if
+
+        if(IncreaseWarehouse = 1) then
+          writeln("- Increasing warehouse, ")
+        else
+          writeln("- Not increasing warehouse, ")
+        end-if
+
+        if(NewContractDecision = 1) then
+          writeln("- Accepting contract.")
+        else
+          writeln("- Not accepting contract.")
+        end-if
+        
+        !Test if optimal solution is found
+        feasibility
+        
+        !if optimal, print the result
+        if status="Optimum found" then
+          writeln("Total profit: £", strfmt(getsol(NewTotalProfit), 0, 1))
+          
+          !if new profit is bigger, update highest strategy profit
+          if(getsol(NewTotalProfit) > getsol(HighestProfit) ) then
+            HighestProfit := getsol(NewTotalProfit)
+          end-if
+        end-if
+        
+        writeln
+      end-do
+    end-do
+  end-do
+  
+  !write highest strategy profit
+  writeln("The highest profit achieved is £", strfmt(getsol(HighestProfit), 0, 1))
+end-procedure
+
+end-model
